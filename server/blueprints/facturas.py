@@ -133,16 +133,20 @@ def add_factura():
 
 
 
-@facturas_bp.route('/listado_facturas', methods=['GET'])
+@facturas_bp.route('/api/facturas', methods=['GET'])
 @login_required
-def listado_facturas():
-    sort_by = request.args.get('sort_by', 'NumeroFactura') 
-    order = request.args.get('order', 'asc') 
+def facturas_api():
+    sort_by = request.args.get('sort_by', 'NumeroFactura')
+    order = request.args.get('order', 'asc')
 
-    valid_columns = ['NumeroFactura', 'NombreEntidad', 'NombreActivo', 'Tipo', 'Fecha', 'Cantidad', 'PrecioUnitario', 'SubTotal', 'Valor']
+    valid_columns = [
+        'NumeroFactura', 'NombreEntidad', 'NombreActivo', 
+        'Tipo', 'Fecha', 'Cantidad', 'PrecioUnitario', 
+        'SubTotal', 'Valor'
+    ]
+    # Ajusta 'NombreEntidad' vs 'Corredora', etc., si quieres ordenarlas también
     if sort_by not in valid_columns:
         sort_by = 'NumeroFactura'
-
     if order not in ['asc', 'desc']:
         order = 'asc'
 
@@ -151,37 +155,60 @@ def listado_facturas():
 
     query = f"""
     SELECT 
-        f.NumeroFactura, 
+        f.NumeroFactura,
         CASE 
             WHEN f.tipo_entidad = 'Entidad' THEN e.Nombre
             WHEN f.tipo_entidad = 'EntidadComercial' THEN ec.Nombre
-        END AS NombreEntidad, 
-        (SELECT Nombre FROM Entidad WHERE ID_Entidad = f.ID_Entidad) AS Corredora, 
-        f.NombreActivo, 
+        END AS EmpresaEmisora,
+        (SELECT Nombre FROM Entidad WHERE ID_Entidad = f.ID_Entidad) AS Corredora,
+        f.NombreActivo,
         f.Tipo,
-        f.Fecha, 
-        f.Cantidad, 
-        f.PrecioUnitario, 
-        f.SubTotal, 
-        f.Valor, 
+        f.Fecha,
+        f.Cantidad,
+        f.PrecioUnitario,
+        f.SubTotal,
+        f.Valor,
         f.AdjuntoFactura
     FROM Facturas f
     LEFT JOIN Entidad e ON f.ID_Entidad = e.ID_Entidad AND f.tipo_entidad = 'Entidad'
     LEFT JOIN EntidadComercial ec ON f.ID_Entidad_Comercial = ec.ID_Entidad AND f.tipo_entidad = 'EntidadComercial'
     ORDER BY {sort_by} {order};
     """
+
     try:
         cursor.execute(query)
-        facturas = cursor.fetchall()
+        rows = cursor.fetchall()
     except Exception as e:
-        print(f"Error en la consulta: {e}")  
-        flash(f"Error al listar las facturas: {e}", "error")
-        facturas = []
+        print(f"Error en la consulta: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
-    cursor.close()
-    conn.close()
+    # Construimos una lista de dicts para enviar a React
+    facturas = []
+    for row in rows:
+        # row: (NumeroFactura, EmpresaEmisora, Corredora, NombreActivo, Tipo, Fecha, Cantidad, PrecioUnitario, SubTotal, Valor, AdjuntoFactura)
+        facturas.append({
+            "numeroFactura": row[0],
+            "empresaEmisora": row[1],
+            "corredora": row[2],
+            "nombreActivo": row[3],
+            "tipo": row[4],
+            "fecha": str(row[5]),  # si es datetime, conviértelo a string
+            "cantidad": float(row[6]),
+            "precioUnitario": float(row[7]),
+            "subTotal": float(row[8]),
+            "valor": float(row[9]),
+            "adjuntoFactura": row[10] or ""
+        })
 
-    return render_template('facturas/listado_facturas.html', facturas=facturas, sort_by=sort_by, order=order)
+    return jsonify({
+        "success": True,
+        "facturas": facturas,
+        "sort_by": sort_by,
+        "order": order
+    })
 
 @facturas_bp.route('/edit_factura/<int:numero_factura>', methods=['GET', 'POST'])
 @login_required
